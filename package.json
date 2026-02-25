@@ -1,0 +1,29 @@
+{
+  "name": "friday-cli",
+  "version": "1.0.0",
+  "description": "Agentic CLI Assistant",
+  "main": "index.ts",
+  "type": "module",
+  "bin": {
+    "friday": "./index.ts"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsx index.ts"
+  },
+  "author": "Asutosh",
+  "license": "ISC",
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.31",
+    "@ai-sdk/openai": "^3.0.31",
+    "ai": "^6.0.97",
+    "dotenv": "^17.3.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

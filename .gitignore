@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment variables — never commit secrets
+.env
+.env.*
+!.env.example
+
+# TypeScript build output
+dist/
+build/
+*.js.map
+
+# pnpm
+.pnpm-store/
+
+# Logs
+*.log
+logs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Downloaded files (Friday saves these to cwd)
+*.pdf
+*.iso
+*.zip
+*.tar.gz
