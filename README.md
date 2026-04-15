@@ -1,8 +1,8 @@
-# ⚡ Friday CLI
+# ⚡ FRIDAY CLI
 
 > A witty, autonomous AI agent that lives in your terminal — powered by Gemini or a local Ollama model.
 
-Friday follows the **ReAct (Reason → Act)** framework: she thinks out loud, decides on an action, executes it, reads the result, and loops — all without you lifting a finger. She can browse the web, run shell commands, navigate directories, and stream files directly to disk.
+FRIDAY follows the **ReAct (Reason → Act)** framework: she thinks out loud, decides on an action, executes it, reads the result, and loops — all without you lifting a finger. She can browse the web, run shell commands, navigate directories, stream files to disk, and even launch long-running processes in the background without losing the interactive session.
 
 ---
 
@@ -10,35 +10,40 @@ Friday follows the **ReAct (Reason → Act)** framework: she thinks out loud, de
 
 | Capability                  | Details                                                                                            |
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
-| 🧠 **Dual model support**   | Switch between Google Gemini 2.0 Flash (cloud) and a local Ollama model with a flag                |
+| 🧠 **Multi-model support**  | Switch between Gemini, Mistral Nemo, Qwen, Gemma and more via the `-m` flag                        |
 | 🕸️ **Web search**           | Google-backed text and image search via [Serper](https://serper.dev) — no scraping, no rate limits |
-| 🤖 **Bash execution**       | Runs shell commands, with a read-safe allowlist and a permission gate for anything risky           |
-| 📂 **Directory navigation** | Handles `cd` natively in-process so her working directory actually changes                         |
+| 🤖 **Bash execution**       | Runs shell commands with real-time streaming output and an elapsed timer for long waits            |
+| 🎮 **Interactive stdin**    | Interactive prompts from tools like `create-next-app` are wired to your keyboard — no hangs        |
+| 🌙 **Background processes** | Long-running daemons (dev servers, watchers) are detached and logged — FRIDAY stays responsive     |
+| 🗂️ **Process registry**     | Background PIDs are persisted to `~/.friday-bg.json` so they survive across sessions               |
+| 📂 **Directory navigation** | `cd` is handled natively in-process so her working directory actually changes                      |
 | ⬇️ **Streaming downloads**  | Fetches files directly to disk with a live progress bar — no buffering the whole file in memory    |
-| 🔄 **Conversational loop**  | After completing a task, Friday stays alive and waits for your next order                          |
+| 🔄 **Conversational loop**  | After completing a task, FRIDAY stays alive and waits for your next order                          |
 | 🛡️ **Safety bouncer**       | Any non-read-only command or download requires explicit `[y/N]` approval before execution          |
-| 🔁 **Self-correction**      | If the model returns malformed JSON, Friday automatically asks it to retry                         |
+| 🔁 **Self-correction**      | If the model returns malformed JSON, FRIDAY automatically asks it to retry                         |
 
 ---
 
 ## Architecture
 
-Friday is a single-file TypeScript agent (`index.ts`) built on the [Vercel AI SDK](https://sdk.vercel.ai). The core is a `while` loop (max 10 steps) that:
+FRIDAY is a single-file TypeScript agent (`index.ts`) built on the [Vercel AI SDK](https://sdk.vercel.ai). The core is a `while` loop (max 10 steps) that:
 
 1. Sends the conversation history to the LLM
 2. Strips everything outside the JSON response
-3. Routes the parsed response to one of four **interceptors**:
+3. Routes the parsed response to one of five **interceptors**:
 
 ```
 LLM Response
     │
-    ├── type: "search"   → serperSearch() → injects results into context
-    ├── type: "command"  → askPermission() → execAsync() / process.chdir()
-    ├── type: "download" → askPermission() → streaming fetch → disk
-    └── type: "chat"     → prints message → reads your next input
+    ├── type: "search"             → serperSearch() → injects results into context
+    ├── type: "command"            → askPermission()
+    │       ├── background: true   → spawnBackground() → detached process + registry entry
+    │       └── background: false  → spawnAsync() → real-time stdout/stderr stream
+    ├── type: "download"           → askPermission() → streaming fetch → disk
+    └── type: "chat"               → prints message → reads your next input
 ```
 
-The step counter resets to `0` every time Friday enters a `chat` turn, giving her a fresh 10-step runway for each new task in the same session.
+The step counter resets to `0` every time FRIDAY enters a `chat` turn, giving her a fresh 10-step runway for each new task in the same session.
 
 ---
 
@@ -46,8 +51,8 @@ The step counter resets to `0` every time Friday enters a `chat` turn, giving he
 
 - **Node.js** v18+ (for native `fetch` and Web Streams)
 - **pnpm** (or npm/yarn)
-- One of the following backends:
-  - [Ollama](https://ollama.com) running locally with `qwen2.5-coder:7b` pulled
+- One or more of the following backends:
+  - [Ollama](https://ollama.com) running locally with the desired model pulled
   - A Google Gemini API key for cloud mode
 
 ---
@@ -77,63 +82,108 @@ GEMINI_API_KEY=your_gemini_api_key_here
 SERPER_API_KEY=your_serper_api_key_here
 ```
 
-| Variable         | Required           | Description                                                        |
-| ---------------- | ------------------ | ------------------------------------------------------------------ |
-| `GEMINI_API_KEY` | Only for `-g` flag | Get one free at [aistudio.google.com](https://aistudio.google.com) |
-| `SERPER_API_KEY` | For web search     | Get 2,500 free queries/month at [serper.dev](https://serper.dev)   |
+| Variable         | Required             | Description                                                        |
+| ---------------- | -------------------- | ------------------------------------------------------------------ |
+| `GEMINI_API_KEY` | Only for `-m gemini` | Get one free at [aistudio.google.com](https://aistudio.google.com) |
+| `SERPER_API_KEY` | For web search       | Get 2,500 free queries/month at [serper.dev](https://serper.dev)   |
 
 ---
 
 ## Usage
 
 ```bash
-friday [flags] <your task>
+friday [-m <model>] <your task>
 ```
 
-### Flags
+### Model Selection
 
-| Flag       | Alias | Description                                             |
-| ---------- | ----- | ------------------------------------------------------- |
-| `--gemini` | `-g`  | Use Google Gemini 2.0 Flash (requires `GEMINI_API_KEY`) |
-| `--qwen`   | `-q`  | Use local Ollama model — `qwen2.5-coder:7b` (default)   |
+Use the `-m` flag (or `--model`) to choose a model. The default is `mistral-nemo` (local Ollama).
+
+| Flag value | Model                    | Backend      |
+| ---------- | ------------------------ | ------------ |
+| `nemo`     | `mistral-nemo` (default) | Local Ollama |
+| `gemma`    | `gemma2:9b`              | Local Ollama |
+| `qwen`     | `qwen2.5-coder:7b`       | Local Ollama |
+| `ollama`   | `gemma2:9b`              | Local Ollama |
+| `gemini`   | Gemini 2.0 Flash         | Google Cloud |
 
 ### Examples
 
 ```bash
-# Run with the local Ollama model (default)
+# Run with the default model (mistral-nemo)
 friday find all .log files older than 7 days and delete them
 
 # Run with Gemini
-friday -g summarise the git log from the last week and tell me what changed
+friday -m gemini summarise the git log from the last week and tell me what changed
+
+# Use Qwen for a coding task
+friday -m qwen refactor the utils.ts file to add JSDoc comments
 
 # Search the web
-friday -g what is the latest stable version of Node.js
+friday -m gemini what is the latest stable version of Node.js
 
 # Download a file
-friday -g download the latest Alpine Linux ISO and save it as alpine.iso
+friday -m gemini download the latest Alpine Linux ISO and save it as alpine.iso
+
+# Start a dev server in the background (FRIDAY detects it needs backgrounding)
+friday start the dev server for this project
+
+# Stop a background process in a new session
+friday stop the dev server
 ```
 
 ### Interactive Session
 
-Once Friday completes a task and enters a `chat` turn, she waits for your next input at the `❯` prompt. Type `exit` or `quit` to end the session.
+Once FRIDAY completes a task and enters a `chat` turn, she waits for your next input at the `❯` prompt. Type `exit` or `quit` to end the session.
 
 ```
-❯ now set the wallpaper to the image you just downloaded
+✨ FRIDAY: Done! The server is running on PID 43291. Logs at /tmp/friday-bg-1234.log. What's next?
+❯ now open the browser at localhost:3000
 ❯ exit
+👋 FRIDAY: Catch ya later, boss.
 ```
 
 ---
 
 ## How the Safety System Works
 
-Before running any **non-read-only command** or initiating a **download**, Friday pauses and asks:
+Before running any **non-read-only command** or initiating a **download**, FRIDAY pauses and asks:
 
 ```
 ⚠️ Allow execution? [y/N]:
 ⚠️ Allow download? [y/N]:
 ```
 
-Commands that only read the filesystem (`ls`, `cat`, `find`, `grep`, `head`, `tail`, `echo`, `wc`, `which`, `pwd`, `whoami`) are automatically approved and run silently. Any command containing shell operators (`>`, `<`, `;`, `&`, `$`, `` ` ``) is **always** blocked and sent to the permission gate.
+Commands that only read the filesystem (`ls`, `cat`, `find`, `grep`, `head`, `tail`, `echo`, `wc`, `which`, `pwd`, `whoami`) are automatically approved. Any command containing shell operators (`>`, `<`, `;`, `&`, `$`, `` ` ``) is **always** sent to the permission gate.
+
+---
+
+## Background Processes
+
+When FRIDAY decides a command is a long-running daemon she uses `"background": true` in her JSON, which:
+
+1. Spawns the process **fully detached** from FRIDAY's event loop
+2. Redirects stdout + stderr to a timestamped log file at `/tmp/friday-bg-<timestamp>.log`
+3. Writes the PID, command, log path, and cwd to **`~/.friday-bg.json`**
+4. Returns the PID and log path to you immediately
+
+**Checking logs:**
+
+```bash
+tail -f /tmp/friday-bg-1234567890.log
+```
+
+**Stopping a background process:**
+
+```bash
+# Ask FRIDAY — she'll read ~/.friday-bg.json and issue the kill
+friday stop the dev server
+
+# Or do it yourself
+kill <pid>
+```
+
+On every FRIDAY startup, dead PIDs are automatically pruned from `~/.friday-bg.json`. If any processes from a previous session are still alive, FRIDAY warns you at launch.
 
 ---
 
