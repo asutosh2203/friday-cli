@@ -241,6 +241,15 @@ Treat these as EXAMPLES ONLY, do not copy them directly.
   "cmd": "npm run dev",
   "background": true
 }
+
+6. To play a song or music:
+{
+  "thought": "User wants to play Back in Black. I'll use the music type.",
+  "type": "music",
+  "query": "Back in Black AC/DC"
+}
+Use this type whenever the user asks to play, queue, or put on a song/album/artist.
+
 You will receive the PID and log file path back. To stop a backgrounded process later, use kill <PID> as a normal command.
 
 Background process registry: The file ~/.friday-bg.json tracks all backgrounded processes with their PIDs, commands, log paths, and working directories. cat this file to find a PID to kill or check a log path.
@@ -259,13 +268,17 @@ const MODEL_MAP: Record<
   ReturnType<typeof google | typeof localOllama>
 > = {
   gemini: google('gemini-2.0-flash'),
-  qwen: localOllama('qwen2.5-coder:7b'),
-  gemma: localOllama('gemma2:9b'),
-  ollama: localOllama('gemma2:9b'),
+  gemma: localOllama('gemma4:e4b'),
   nemo: localOllama('mistral-nemo'),
 };
 
-const DEFAULT_MODEL = 'mistral-nemo';
+// Ollama model tags for cleanup — only local models need offloading
+const OLLAMA_MODEL_TAGS: Record<string, string> = {
+  gemma: 'gemma4:e4b',
+  nemo: 'mistral-nemo',
+};
+
+const DEFAULT_MODEL = 'gemma';
 
 // Capture the orders
 const rawArgs = process.argv.slice(2);
@@ -311,7 +324,7 @@ interface Message {
 
 interface ParsedResponse {
   thought: string;
-  type: 'chat' | 'command' | 'search' | 'download';
+  type: 'chat' | 'command' | 'search' | 'download' | 'music';
   message?: string;
   cmd?: string;
   background?: boolean;
@@ -654,6 +667,15 @@ async function startFRIDAY(): Promise<void> {
             process.stdout.write = process.stdout.write; // no-op safety restore
             clearTimer();
 
+            // Ctrl+C — user interrupted the command, exit cleanly
+            if (
+              error.signal === 'SIGINT' ||
+              error.message?.includes('code 130')
+            ) {
+              console.log('\n👋 FRIDAY: Interrupted. Catch ya later, boss.');
+              process.exit(0);
+            }
+
             const combinedOutput =
               (error.stdout || '') + '\n' + (error.stderr || '');
             syncDirAndCleanOutput(combinedOutput);
@@ -758,6 +780,106 @@ async function startFRIDAY(): Promise<void> {
           }
           continue;
         }
+
+        // 🎵 Music Interceptor
+        if (parsed.type === 'music') {
+          const query = parsed.query ?? '';
+          console.log(`\n🎵 FRIDAY: Playing \x1b[35m${query}\x1b[0m ...`);
+
+          // Fallback chain: spotify_player → xdg-open URI → browser
+          const tryPlay = async (): Promise<string> => {
+            // 1. Try spotify_player (silent exec — no streaming to terminal)
+            try {
+              const { execSync } = await import('child_process');
+              const silent = (cmd: string) =>
+                execSync(cmd, {
+                  encoding: 'utf-8',
+                  stdio: ['ignore', 'pipe', 'pipe'],
+                });
+
+              // Step 1: search for the track
+              const searchOut = silent(
+                `spotify_player get item --name ${JSON.stringify(query)} track`,
+              );
+              const track = JSON.parse(searchOut.trim());
+              const trackId: string = track.id;
+
+              // Step 2: activate a device (Spotify 404s if no active device)
+              let devicesOut = silent(`spotify_player get key devices`);
+              let devices: Array<{
+                id: string;
+                name: string;
+                type: string;
+                is_active: boolean;
+              }> = JSON.parse(devicesOut.trim());
+
+              // Prefer Computer devices (browser/desktop app on this PC)
+              // Skip Speakers to avoid blasting music on a remote Echo
+              const computers = devices.filter((d) => d.type === 'Computer');
+
+              // No computer device → spawn spotify_player as a local device
+              if (computers.length === 0) {
+                console.log(
+                  `\x1b[90m   → No PC device found, starting spotify_player...\x1b[0m`,
+                );
+                spawnBackground('spotify_player', process.cwd());
+                // Wait for it to register with Spotify
+                await new Promise((r) => setTimeout(r, 3000));
+                devicesOut = silent(`spotify_player get key devices`);
+                devices = JSON.parse(devicesOut.trim());
+                computers.push(...devices.filter((d) => d.type === 'Computer'));
+              }
+
+              const device = computers.find((d) => d.is_active) ?? computers[0];
+              if (device) {
+                try {
+                  silent(`spotify_player connect --id ${device.id}`);
+                  console.log('Connected to Spotify on ' + device.name);
+                } catch (e: any) {
+                  console.log(
+                    `⚠️  Couldn't connect to device "${device.name}": ${e.message?.split('\n')[0]}`,
+                  );
+                }
+              }
+
+              // Step 3: play by id
+              silent(`spotify_player playback start track --id ${trackId}`);
+              return `Now playing "${track.name}" by ${track.artists?.[0]?.name ?? 'Unknown'} on Spotify.`;
+            } catch (e: any) {
+              console.log(
+                `\x1b[90m   spotify_player failed: ${e.message?.split('\n')[0]}\x1b[0m`,
+              );
+            }
+
+            // 2. Try xdg-open with Spotify URI
+            try {
+              await spawnAsync(
+                `xdg-open "spotify:search:${encodeURIComponent(query)}"`,
+                process.cwd(),
+              );
+              return `In terminal playback failed, Opened Spotify search for "${query}".`;
+            } catch {}
+
+            // 3. Last resort: browser
+            await spawnAsync(
+              `xdg-open "https://open.spotify.com/search/${encodeURIComponent(query)}"`,
+              process.cwd(),
+            );
+            return `In terminal playback failed, opened Spotify web search for "${query}" in the browser.`;
+          };
+
+          try {
+            const result = await tryPlay();
+            messages.push({ role: 'user', content: result });
+          } catch (err: any) {
+            console.log(`\n❌ Couldn't play music: ${err.message}`);
+            messages.push({
+              role: 'user',
+              content: `Music playback failed: ${err.message}`,
+            });
+          }
+          continue;
+        }
       } catch (e) {
         messages.push({ role: 'assistant', content: text });
         messages.push({
@@ -784,4 +906,13 @@ if (activeBgProcesses.length > 0) {
   console.log(`   Check \\x1b[90m${BG_REGISTRY}\\x1b[0m for details.\n`);
 }
 
-startFRIDAY();
+startFRIDAY().finally(() => {
+  // Offload Ollama model from VRAM on exit
+  const ollamaTag = OLLAMA_MODEL_TAGS[selectedModelName];
+  if (ollamaTag) {
+    try {
+      const { execSync } = require('child_process');
+      execSync(`ollama stop ${ollamaTag}`, { stdio: 'ignore' });
+    } catch {}
+  }
+});
