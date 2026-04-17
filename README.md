@@ -18,6 +18,7 @@ FRIDAY follows the **ReAct (Reason → Act)** framework: she thinks out loud, de
 | 🗂️ **Process registry**     | Background PIDs are persisted to `~/.friday-bg.json` so they survive across sessions               |
 | 📂 **Directory navigation** | `cd` is handled natively in-process so her working directory actually changes                      |
 | ⬇️ **Streaming downloads**  | Fetches files directly to disk with a live progress bar — no buffering the whole file in memory    |
+| 🎵 **Spotify playback**     | Play any song by name via `spotify_player` — auto-starts a local device if none is active          |
 | 🔄 **Conversational loop**  | After completing a task, FRIDAY stays alive and waits for your next order                          |
 | 🛡️ **Safety bouncer**       | Any non-read-only command or download requires explicit `[y/N]` approval before execution          |
 | 🔁 **Self-correction**      | If the model returns malformed JSON, FRIDAY automatically asks it to retry                         |
@@ -40,6 +41,7 @@ LLM Response
     │       ├── background: true   → spawnBackground() → detached process + registry entry
     │       └── background: false  → spawnAsync() → real-time stdout/stderr stream
     ├── type: "download"           → askPermission() → streaming fetch → disk
+    ├── type: "music"              → search track → activate PC device → playback start
     └── type: "chat"               → prints message → reads your next input
 ```
 
@@ -142,6 +144,50 @@ Once FRIDAY completes a task and enters a `chat` turn, she waits for your next i
 ❯ exit
 👋 FRIDAY: Catch ya later, boss.
 ```
+
+---
+
+## Spotify Music Playback
+
+FRIDAY can play songs on Spotify via [`spotify_player`](https://github.com/aome510/spotify-player). Just ask naturally:
+
+```bash
+friday -m gemini "play Back in Black"
+friday -m gemini "put on some Plini"
+friday -m gemini "I want to listen to Hotel California"
+```
+
+### Setup
+
+**1. Install `spotify_player`**
+
+Download the pre-built binary for your platform from the [releases page](https://github.com/aome510/spotify-player/releases) and place it in `~/.local/bin`.
+
+**2. Create a Spotify app**
+
+Go to [developer.spotify.com](https://developer.spotify.com/dashboard), create an app, and add `http://localhost:8888/callback` as a redirect URI.
+
+**3. Configure `spotify_player`**
+
+Run `spotify_player` once — it generates `~/.config/spotify-player/app.toml`. Add your credentials:
+
+```toml
+[app_config]
+client_id = "your_client_id"
+client_secret = "your_client_secret"
+```
+
+Then run `spotify_player` again to authenticate via the browser.
+
+### How it works
+
+1. FRIDAY searches for the track by name and retrieves its Spotify ID
+2. It checks your active devices, preferring **Computer** type (browser/desktop app) to avoid accidentally playing on a remote speaker
+3. If no PC device is found, it auto-starts `spotify_player` in the background as a local audio device (requires `streaming` feature — included in pre-built binaries)
+4. Connects to the device and starts playback
+5. Falls back to opening Spotify in the browser if any step fails
+
+> **Note:** Spotify must be open on at least one device (browser, phone, or desktop app) unless `spotify_player` is running as a local device.
 
 ---
 
